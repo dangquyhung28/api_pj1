@@ -3,12 +3,21 @@ import requests
 import pyodbc
 import flask
 import json  
-import logging
-from Config import *
 from SQLQuery import *
 app = flask.Flask(__name__)
+
 try:
     # kết nối
+    con_str = (
+    "Driver={ODBC Driver 17 for SQL Server};"  # Driver bạn đã cài đặt
+    "Server=qlbanhangeateasy.c7ioueoo2lo7.ap-southeast-2.rds.amazonaws.com;"  # Public IP address của SQL Server trên Google Cloud
+    "Database=QLBanHangEatEasy;"  # Tên database của bạn
+    "UID=admin;"  # Tên user
+    "PWD=Admin6969;"  # Mật khẩu
+    "Encrypt=yes;"  # Mã hóa kết nối
+    "TrustServerCertificate=yes;"  # Chấp nhận chứng chỉ máy chủ
+    )
+
     conn = pyodbc.connect(con_str)
     print("Kết nối Thành công")
     # GET: select, POST: insert, PUT: cập nhật dữ liệu, DELETE: xóa dữ liệu
