@@ -6,17 +6,34 @@ import json
 import logging
 from Config import *
 from SQLQuery import *
+app = flask.Flask(__name__)
 try:
     # kết nối
     conn = pyodbc.connect(con_str)
     print("Kết nối Thành công")
-    app = flask.Flask(__name__)
     # GET: select, POST: insert, PUT: cập nhật dữ liệu, DELETE: xóa dữ liệu
     @app.route('/api/sanpham/getall', methods=['GET'])
     def getAllSanPham():
         try:
             cursor = conn.cursor()
             sql = SQLGETALL_SP
+            cursor.execute(sql)
+            results = [] # kết quả
+            keys = []
+            for i in cursor.description: # lấy các key
+                keys.append(i[0])
+            for i in cursor.fetchall(): # lấy tất cả bản ghi
+                results.append(dict(zip(keys, i)))
+            resp = flask.jsonify(results)
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi":e})
+    @app.route('/api/ncc/getall', methods=['GET'])
+    def getAllNCC():
+        try:
+            cursor = conn.cursor()
+            sql = SQLGETALL_NCC
             cursor.execute(sql)
             results = [] # kết quả
             keys = []
@@ -188,7 +205,7 @@ try:
             if 'conn' in locals():
                 conn.close()
 
-
+    
     @app.route('/api/sanpham/delete/<MaSP>', methods=['DELETE'])
     def deleteSanPham(MaSP):
         cursor = None
@@ -286,36 +303,56 @@ try:
         #KET THUC API DANH MUC
         #BAT DAU API USER
     @app.route('/api/user/add', methods=['POST'])
-    def addUser():
+    def add_user():
         try:
             # Lấy dữ liệu từ yêu cầu POST
             data = flask.request.get_json()
+
             # Kiểm tra dữ liệu đầu vào
             SĐT = data.get('SĐT')  # Số điện thoại
             Email = data.get('Email')  # Email
             Password = data.get('PassWord')  # Mật khẩu
             Type = data.get('Type')
+            facebook_id = data.get("Facebook_ID")# Loại người dùng
 
-            if not all([SĐT, Email, Password, Type]):
-                return flask.jsonify({"lỗi": "Thiếu thông tin người dùng"}), 400
+            # Kiểm tra các thông tin bắt buộc
+            if not all([SĐT, Email, Password, Type, facebook_id]):
+                return flask.jsonify({"error": "Thiếu thông tin bắt buộc"}), 400
 
-            # Kiểm tra Type: 1 là khách hàng, 0 là nhân viên
+            # Kiểm tra giá trị hợp lệ của Type
             if Type not in [0, 1]:
-                return flask.jsonify({"lỗi": "Loại người dùng không hợp lệ"}), 400
+                return flask.jsonify({"error": "Loại người dùng không hợp lệ"}), 400
 
-            # Gọi procedure thêm người dùng vào bảng tbUser
+            # Kết nối cơ sở dữ liệu và gọi stored procedure
             cursor = conn.cursor()
-            sql = "{CALL proc_AddUser(?, ?, ?, ?)}"  # Stored procedure thêm người dùng
-            params = (SĐT, Email, Password, Type)
+
+            # Câu lệnh EXEC với tham số cụ thể
+            sql = f"""
+            EXEC [dbo].[proc_AddUser] 
+            @SĐT = ?, 
+            @Email = ?, 
+            @Password = ?, 
+            @Type = ?,
+            @facebook_ID = ?;
+            """
+            params = (SĐT, Email, Password, Type, facebook_id)
+
+            # Thực thi stored procedure
             cursor.execute(sql, params)
             conn.commit()
-            
-            return flask.jsonify({"thông báo": "Thêm người dùng thành công"}), 201
+
+            # Trả về phản hồi thành công
+            return flask.jsonify({"message": "Thêm người dùng thành công"}), 201
+
         except Exception as e:
-            return flask.jsonify({"lỗi": str(e)}), 500
+            # Trả về lỗi nếu xảy ra
+            return flask.jsonify({"error": str(e)}), 500
+
         finally:
+            # Đảm bảo đóng cursor
             if cursor:
                 cursor.close()
+
 
     @app.route('/api/user/getall', methods=['GET'])
     def getAllUser():
@@ -367,41 +404,53 @@ try:
 
         except Exception as e:
             return flask.jsonify({"status": "error", "message": str(e)}), 500
+    @app.route('/api/khachhang/update', methods=['PUT'])
+    def cap_nhat_khach_hang():
+        try:
+            # Lấy dữ liệu từ request
+            data = flask.request.get_json()
+            MaKH = data.get('MaKH')
+            HoTen = data.get('HoTen')
+            DiaChi = data.get('DiaChi')
+
+            # Kiểm tra tham số đầu vào
+            if not MaKH or HoTen is None or DiaChi is None:
+                return flask.jsonify({"error": "Thiếu tham số MaKH, HoTen hoặc DiaChi"}), 400
+
+            # Thực thi stored procedure
+            cursor = conn.cursor()
+            cursor.execute("{CALL usp_UpdateKhachHang (?, ?, ?)}", (MaKH, HoTen, DiaChi))
+            conn.commit()
+
+            # Trả về phản hồi thành công
+            return flask.jsonify({"message": "Thông tin khách hàng đã được cập nhật thành công"}), 200
+
+        except Exception as e:
+            # Xử lý lỗi
+            return flask.jsonify({"error": str(e)}), 500
+
+        finally:
+            cursor.close()
 
     #KET THUC API USER
     #API HOA DON NHAP
     @app.route('/api/get-hoa-don-nhap', methods=['GET'])
     def get_hoa_don_nhap():
         try:
-            # Kết nối cơ sở dữ liệu
-            conn = pyodbc.connect(con_str)
             cursor = conn.cursor()
-
-            # Truy vấn dữ liệu từ bảng tbHoaDonNhap
-            cursor.execute("SELECT * FROM tbHoaDonNhap")
-            rows = cursor.fetchall()
-
-            # Chuyển dữ liệu thành danh sách các từ điển
-            columns = [column[0] for column in cursor.description]  # Lấy tên các cột
-            result = [dict(zip(columns, row)) for row in rows]  # Chuyển từng dòng thành dictionary
-
-            # Trả về dữ liệu dưới dạng JSON
-            return flask.jsonify({
-                "status": "success",
-                "data": result
-            }), 200
-
+            sql =  "SELECT * FROM tbHoaDonNhap"
+            cursor.execute(sql)
+            results = [] # kết quả
+            keys = []
+            for i in cursor.description: # lấy các key
+                keys.append(i[0])
+            for i in cursor.fetchall(): # lấy tất cả bản ghi
+                results.append(dict(zip(keys, i)))
+            resp = flask.jsonify(results)
+            resp.status_code = 200
+            return resp
         except Exception as e:
-            # Log lỗi chi tiết
-            return flask.jsonify({"status": "error", "message": f"Lỗi: {str(e)}"}), 500
-
-        finally:
-            # Đảm bảo đóng kết nối và cursor
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()
-
+            return flask.jsonify({"lỗi":e})
     @app.route('/api/create-hoa-don-nhap', methods=['POST'])
     def create_hoa_don_nhap():
         try:
@@ -587,37 +636,165 @@ try:
     @app.route('/api/get-don-hang', methods=['GET'])
     def get_don_hang():
         try:
-            # Kết nối cơ sở dữ liệu
-            conn = pyodbc.connect(con_str)
             cursor = conn.cursor()
+            sql =  "SELECT * FROM tbDonHang where TrangThai = N'Hoàn thành'"
+            cursor.execute(sql)
+            results = [] # kết quả
+            keys = []
+            for i in cursor.description: # lấy các key
+                keys.append(i[0])
+            for i in cursor.fetchall(): # lấy tất cả bản ghi
+                results.append(dict(zip(keys, i)))
+            resp = flask.jsonify(results)
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi":e})
+    @app.route('/api/donhang/chitiet', methods=['GET'])
+    def getChiTietDonHang():
+        try:
+            # Lấy tham số MaDonHang từ query string
+            MaDonHang = flask.request.args.get('MaDonHang')
 
-            # Thực thi câu lệnh SQL để lấy dữ liệu
-            cursor.execute("SELECT * FROM tbDonHang")
-            rows = cursor.fetchall()
+            if not MaDonHang:
+                return flask.jsonify({"lỗi": "Thiếu tham số MaDonHang"}), 400
 
-            # Lấy tên các cột
-            columns = [column[0] for column in cursor.description]
+            # Thực hiện truy vấn từ View
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT *
+                FROM View_ChiTietDonHang_JSON
+                WHERE MaDonHang = ?
+            """, MaDonHang)
+            
+            # Lấy kết quả
+            row = cursor.fetchone()
 
-            # Chuyển đổi kết quả truy vấn thành danh sách từ điển
-            result = [dict(zip(columns, row)) for row in rows]
+            # Kiểm tra nếu không tìm thấy đơn hàng
+            if not row:
+                return flask.jsonify({"lỗi": "Không tìm thấy đơn hàng"}), 404
 
-            # Trả về kết quả dưới dạng JSON
-            return flask.jsonify({
-                "status": "success",
-                "data": result
-            }), 200
+            # Parse SanPham từ chuỗi JSON sang mảng JSON
+            try:
+                san_pham = json.loads(row.SanPham)
+            except json.JSONDecodeError:
+                san_pham = []  # Nếu lỗi parse, trả về danh sách rỗng
+
+            # Chuyển đổi dữ liệu thành JSON
+            order_details = {
+                "MaDonHang": row.MaDonHang,
+                "SDT": row.SDT,
+                "TenKhachHang": row.TenKhachHang,
+                "DiaChiKhachHang": row.DiaChiKhachHang,
+                "NgayTaoGioHang": row.NgayTaoGioHang,
+                "SanPham": san_pham
+            }
+
+            return flask.jsonify(order_details), 200
 
         except Exception as e:
-            # Trả về thông báo lỗi nếu có
-            return flask.jsonify({"status": "error", "message": f"Lỗi: {str(e)}"}), 500
-
+            return flask.jsonify({"lỗi": str(e)}), 500
         finally:
-            # Đảm bảo đóng kết nối
-            if 'cursor' in locals():
+            cursor.close()
+    @app.route('/api/get-don-hang/khachhang', methods=['GET'])
+    def get_don_hang_kh():
+        try:
+            MaKH = flask.request.args.get('MaKH')
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM tbDonHang where TrangThai = N'Hoàn thành'  and MaKH = ?", (MaKH,))
+            results = [] # kết quả
+            keys = []
+            for i in cursor.description: # lấy các key
+                keys.append(i[0])
+            for i in cursor.fetchall(): # lấy tất cả bản ghi
+                results.append(dict(zip(keys, i)))
+            resp = flask.jsonify(results)
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi":e})
+    @app.route('/api/donhang/nhan', methods=['PUT'])
+    def nhanDonHang():
+        try:
+            # Lấy MaDonHang từ request body
+            data = flask.request.get_json()
+            ma_don_hang = data.get('MaDonHang')
+            print("Mã đơn hàng:", ma_don_hang)
+
+            if not ma_don_hang:
+                return flask.jsonify({"error": "Thiếu mã đơn hàng"}), 400
+
+            # Kết nối với cơ sở dữ liệu và gọi stored procedure
+            cursor = conn.cursor()
+            cursor.execute("EXEC CapNhatTrangThaiHoanThanh @MaDH = ?", (ma_don_hang,))
+            conn.commit()
+            result = cursor.fetchone()
+
+            if result:
+                # In tên các cột để debug
+                columns = [column[0] for column in cursor.description]
+                print("Tên các cột:", columns)
+                print("Kết quả trả về:", result)
+
+                # Truy cập dữ liệu bằng tên cột
+                error_message = result[columns.index('ErrorMessage')] if 'ErrorMessage' in columns else None
+                message = result[columns.index('Message')] if 'Message' in columns else None
+
+                if error_message:
+                    return flask.jsonify({"error": error_message}), 400
+                elif message:
+                    return flask.jsonify({"message": message}), 200
+            else:
+                return flask.jsonify({"error": "Không thể cập nhật đơn hàng"}), 500
+
+        except Exception as e:
+            import traceback
+            print("Lỗi chi tiết:", traceback.format_exc())
+            return flask.jsonify({"error": str(e)}), 500
+        finally:
+            if 'cursor' in locals() and cursor:
                 cursor.close()
-            if 'conn' in locals():
-                conn.close()
-    
+    @app.route('/api/donhang/xulydon', methods=['PUT'])
+    def xuLyDonHang():
+        try:
+            # Lấy MaDonHang từ request body
+            data = flask.request.get_json()
+            ma_don_hang = data.get('MaDonHang')
+            print("Mã đơn hàng:", ma_don_hang)
+
+            if not ma_don_hang:
+                return flask.jsonify({"error": "Thiếu mã đơn hàng"}), 400
+
+            # Kết nối với cơ sở dữ liệu và gọi stored procedure
+            cursor = conn.cursor()
+            cursor.execute("EXEC CapNhatTrangThaiChoXuLy @MaDH = ?", (ma_don_hang,))
+            result = cursor.fetchone()
+
+            if result:
+                # In tên các cột để debug
+                columns = [column[0] for column in cursor.description]
+                print("Tên các cột:", columns)
+                print("Kết quả trả về:", result)
+
+                # Truy cập dữ liệu bằng tên cột
+                error_message = result[columns.index('ErrorMessage')] if 'ErrorMessage' in columns else None
+                message = result[columns.index('Message')] if 'Message' in columns else None
+
+                if error_message:
+                    return flask.jsonify({"error": error_message}), 400
+                elif message:
+                    return flask.jsonify({"message": message}), 200
+            else:
+                return flask.jsonify({"error": "Không thể cập nhật đơn hàng"}), 500
+
+        except Exception as e:
+            import traceback
+            print("Lỗi chi tiết:", traceback.format_exc())
+            return flask.jsonify({"error": str(e)}), 500
+        finally:
+            if 'cursor' in locals() and cursor:
+                cursor.close()
+
     @app.route('/api/create-don-hang', methods=['POST'])
     def create_don_hang():
         try:
@@ -704,143 +881,277 @@ try:
                 cursor.close()
             if 'conn' in locals():
                 conn.close()
-
-    @app.route('/api/get-doanh-thu-theo-ngay', methods=['POST'])
-    def get_doanh_thu_theo_ngay():
+    #LAY GIO HANG
+    @app.route('/api/giohang', methods=['GET'])
+    def get_gio_hang_by_ma_khach_hang():
         try:
-            # Lấy dữ liệu từ request
-            data = flask.request.get_json()
+            # Lấy tham số MaKH từ query string
+            MaKH = flask.request.args.get('MaKH')
 
-            # Lấy tham số Ngày cần tính doanh thu
-            ngay = data.get('Ngay')  # Ngày cần tính doanh thu
+            if not MaKH:
+                return flask.jsonify({"lỗi": "Thiếu tham số MaKH"}), 400
 
-            # Kiểm tra xem có thiếu tham số nào không
-            if not ngay:
-                return flask.jsonify({"status": "error", "message": "Thiếu Ngày"}), 400
-
-            # Kết nối cơ sở dữ liệu
-            conn = pyodbc.connect(con_str)
+            # Thực thi Stored Procedure trong SQL Server
             cursor = conn.cursor()
-
-            # Thực thi thủ tục GetDoanhThuTheoNgay
-            cursor.execute("EXEC GetDoanhThuTheoNgay @Ngay = ?", ngay)
+            # Gọi stored procedure LaySanPhamGioHangTheoMaKH với tham số MaKH
+            cursor.execute("{CALL LaySanPhamGioHangTheoMaKH (?)}", MaKH)
 
             # Lấy kết quả
-            result = cursor.fetchone()
-            if result:
-                doanh_thu = result[1]  # Lấy tổng doanh thu
-            else:
-                doanh_thu = 0
+            rows = cursor.fetchall()
 
-            # Trả về kết quả
-            return flask.jsonify({
-                "status": "success",
-                "Ngay": ngay,
-                "TongDoanhThu": doanh_thu
-            }), 200
+            # Kiểm tra nếu không có sản phẩm trong giỏ hàng
+            if not rows:
+                return flask.jsonify({"lỗi": "Không tìm thấy sản phẩm trong giỏ hàng"}), 404
+
+            # Chuyển đổi dữ liệu thành JSON
+            cart_items = []
+            for row in rows:
+                item = {
+                    "MaDonHang": row.MaDonHang,
+                    "MaKhachHang": row.MaKhachHang,
+                    "TenKhachHang": row.TenKhachHang,
+                    "MaSanPham": row.MaSanPham,
+                    "TenSanPham": row.TenSanPham,
+                    "MoTaSanPham": row.MoTaSanPham,
+                    "GiaBan": row.GiaBan,
+                    "SoLuong": row.SoLuong,
+                    "AnhSanPham": row.AnhSanPham,
+                    "GiamGia": row.GiamGia,
+                    "ThanhTien": row.ThanhTien,
+                    "NgayTaoGioHang": row.NgayTaoGioHang
+                }
+                cart_items.append(item)
+
+            return flask.jsonify(cart_items), 200
 
         except Exception as e:
-            # Log lỗi chi tiết
-            return flask.jsonify({"status": "error", "message": f"Lỗi: {str(e)}"}), 500
+            return flask.jsonify({"lỗi": str(e)}), 500
 
         finally:
-            # Đảm bảo đóng kết nối và cursor
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()       
-                
-    @app.route('/api/get-doanh-thu-theo-thang', methods=['POST'])
-    def get_doanh_thu_theo_thang():
+            cursor.close() # Đảm bảo cursor được đóng
+    @app.route('/api/giohang/add', methods=['POST'])
+    def them_san_pham_vao_gio_hang():
         try:
             # Lấy dữ liệu từ request
             data = flask.request.get_json()
+            MaKH = data.get('MaKH')
+            MaSP = data.get('MaSP')
+            SoLuong = data.get('SoLuong')
 
-            # Lấy tham số Tháng và Năm cần tính doanh thu
-            thang = data.get('Thang')  # Tháng cần tính doanh thu
-            nam = data.get('Nam')      # Năm cần tính doanh thu
+            # Kiểm tra tham số đầu vào
+            if not MaKH or not MaSP or SoLuong is None:
+                return flask.jsonify({"error": "Thiếu tham số MaKH, MaSP hoặc SoLuong"}), 400
 
-            # Kiểm tra xem có thiếu tham số nào không
+            # Thực thi stored procedure
+            cursor = conn.cursor()
+            cursor.execute("{CALL ThemSanPhamVaoGioHang (?, ?, ?)}", (MaKH, MaSP, SoLuong))
+            conn.commit()
+
+            # Trả về phản hồi thành công
+            return flask.jsonify({"message": "Sản phẩm đã được thêm vào giỏ hàng thành công"}), 200
+
+        except Exception as e:
+            # Xử lý lỗi
+            return flask.jsonify({"error": str(e)}), 500
+
+        finally:
+            cursor.close()
+            
+    #XOA SP khoi gio hang
+    @app.route('/giohang/delete/<MaKH>/<MaSP>', methods=['DELETE'])
+    def deleteSP(MaKH, MaSP):
+        cursor = None
+        try:
+            # Kiểm tra xem MaKH và MaSP có bị thiếu hay không
+            if not MaKH or not MaSP:
+                return flask.jsonify({"lỗi": "Thiếu mã khách hàng hoặc mã sản phẩm"}), 400
+
+            # Kết nối cơ sở dữ liệu và gọi procedure XoaSanPhamKhoiGioHang
+            cursor = conn.cursor()
+
+            # Thực thi stored procedure XoaSanPhamKhoiGioHang với MaKH và MaSP
+            sql = "{CALL XoaSanPhamKhoiGioHang(?, ?)}"
+            cursor.execute(sql, (MaKH, MaSP))
+
+            # Commit nếu không có lỗi
+            conn.commit()
+
+            # Kiểm tra xem sản phẩm đã được xóa hay không
+            if cursor.rowcount == 0:  # Nếu không có thay đổi, tức là không tìm thấy sản phẩm trong giỏ hàng
+                return flask.jsonify({"thông báo": "Sản phẩm không có trong giỏ hàng"}), 404
+            else:
+                return flask.jsonify({"thông báo": "Xóa sản phẩm khỏi giỏ hàng thành công"}), 200
+
+        except Exception as e:
+            conn.rollback()  # Rollback giao dịch nếu có lỗi
+            print(f"Lỗi: {e}")  # Debug lỗi chi tiết trong console
+            return flask.jsonify({"lỗi": f"Lỗi khi xóa sản phẩm: {str(e)}"}), 500
+
+        finally:
+            if cursor:
+                cursor.close() 
+    #CAP NHAT
+    @app.route('/api/giohang/update', methods=['PUT'])
+    def cap_nhat_so_luong_san_pham():
+        try:
+            # Lấy dữ liệu từ request
+            data = flask.request.get_json()
+            MaKH = data.get('MaKH')
+            MaSP = data.get('MaSP')
+            SoLuong = data.get('SoLuong')
+
+            # Kiểm tra tham số đầu vào
+            if not MaKH or not MaSP or SoLuong is None:
+                return flask.jsonify({"error": "Thiếu tham số MaKH, MaSP hoặc SoLuong"}), 400
+
+            # Thực thi stored procedure
+            cursor = conn.cursor()
+            cursor.execute("{CALL CapNhatSoLuongSanPhamTrongGioHang (?, ?, ?)}", (MaKH, MaSP, SoLuong))
+            conn.commit()
+
+            # Trả về phản hồi thành công
+            return flask.jsonify({"message": "Số lượng sản phẩm đã được cập nhật thành công"}), 200
+
+        except Exception as e:
+            # Xử lý lỗi
+            return flask.jsonify({"error": str(e)}), 500
+
+        finally:
+            cursor.close()
+
+    #LAY DON HANG
+    #DOANH THU
+    @app.route('/api/doanhthu/ngay', methods=['GET'])
+    def getDoanhThuNgay():
+        try:
+            cursor = conn.cursor()
+            
+            # Gọi stored procedure sp_DoanhThuNgay
+            cursor.execute("EXEC sp_TinhDoanhThuHomNay")
+            result = cursor.fetchone()
+            
+            if result:
+                resp = flask.jsonify({"DoanhThuNgay": result.TongDoanhThu})
+                resp.status_code = 200
+            else:
+                resp = flask.jsonify({"DoanhThuNgay": 0})
+                resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi": str(e)}), 500
+    @app.route('/api/doanhthu/sanpham/homnay', methods=['GET'])
+    def getDoanhThuSanPhamHomNay():
+        try:
+            cursor = conn.cursor()
+            
+            # Gọi stored procedure sp_TinhDoanhThuChiTietHomNay
+            cursor.execute("EXEC sp_TinhDoanhThuChiTietHomNay")
+            results = cursor.fetchall()
+            
+            # Chuẩn bị dữ liệu trả về
+            data = []
+            for row in results:
+                data.append({
+                    "TenSP": row.TenSP,
+                    "SoLuongBan": row.SoLuongBan,
+                    "DoanhThu": row.DoanhThuSanPham
+                })
+            
+            resp = flask.jsonify(data)
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi": str(e)}), 500
+
+        
+    @app.route('/api/doanhthu/thang', methods=['GET'])
+    def getDoanhThuThang():
+        try:
+            cursor = conn.cursor()
+            
+            # Gọi stored procedure sp_DoanhThuThang
+            cursor.execute("EXEC sp_DoanhThuThang")
+            result = cursor.fetchone()
+            
+            if result:
+                resp = flask.jsonify({"DoanhThuThang": result.DoanhThuThang})
+                resp.status_code = 200
+            else:
+                resp = flask.jsonify({"DoanhThuThang": 0})
+                resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi": str(e)}), 500
+
+    @app.route('/api/doanhthu/chiTietThang', methods=['GET'])
+    def getDoanhThuChiTietThang():
+        try:
+            # Lấy tham số tháng và năm từ query string
+            thang = flask.request.args.get('thang', type=int)
+            nam = flask.request.args.get('nam', type=int)
+            
             if not thang or not nam:
-                return flask.jsonify({"status": "error", "message": "Thiếu Tháng hoặc Năm"}), 400
-
-            # Kết nối cơ sở dữ liệu
-            conn = pyodbc.connect(con_str)
+                return flask.jsonify({"lỗi": "Cần truyền tham số tháng và năm"}), 400
+            
             cursor = conn.cursor()
+            
+            # Gọi stored procedure sp_DoanhThuChiTietThang và truyền tham số tháng và năm
+            cursor.execute("EXEC sp_DoanhThuChiTietThang ?, ?", thang, nam)
+            results = cursor.fetchall()
+            
+            data = []
+            for row in results:
+                data.append({
+                    "TenSP": row.TenSP,
+                    "SoLuongBan": row.SoLuongBan,
+                    "DoanhThuSanPham": row.DoanhThuSanPham
+                })
 
-            # Thực thi thủ tục GetDoanhThuTheoThang
-            cursor.execute("EXEC GetDoanhThuTheoThang @Thang = ?, @Nam = ?", thang, nam)
-
-            # Lấy kết quả
-            result = cursor.fetchone()
-            if result:
-                doanh_thu = result[2]  # Lấy tổng doanh thu
-            else:
-                doanh_thu = 0
-
-            # Trả về kết quả
-            return flask.jsonify({
-                "status": "success",
-                "Thang": thang,
-                "Nam": nam,
-                "TongDoanhThu": doanh_thu
-            }), 200
-
+            resp = flask.jsonify(data)
+            resp.status_code = 200
+            return resp
         except Exception as e:
-            # Log lỗi chi tiết
-            return flask.jsonify({"status": "error", "message": f"Lỗi: {str(e)}"}), 500
+            return flask.jsonify({"lỗi": str(e)}), 500
 
-        finally:
-            # Đảm bảo đóng kết nối và cursor
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()    
-                
-    @app.route('/api/get-doanh-thu-theo-nam', methods=['POST'])
-    def get_doanh_thu_theo_nam():
+
+    
+    #XU LY DAT HANG
+    @app.route('/donhang/xulychitiet', methods=['GET'])
+    def getDonXuLy_ct():
         try:
-            # Lấy dữ liệu từ request
-            data = flask.request.get_json()
-
-            # Lấy tham số Năm cần tính doanh thu
-            nam = data.get('Nam')  # Năm cần tính doanh thu
-
-            # Kiểm tra xem có thiếu tham số nào không
-            if not nam:
-                return flask.jsonify({"status": "error", "message": "Thiếu Năm"}), 400
-
-            # Kết nối cơ sở dữ liệu
-            conn = pyodbc.connect(con_str)
             cursor = conn.cursor()
-
-            # Thực thi thủ tục GetDoanhThuTheoNam
-            cursor.execute("EXEC GetDoanhThuTheoNam @Nam = ?", nam)
-
-            # Lấy kết quả
-            result = cursor.fetchone()
-            if result:
-                doanh_thu = result[1]  # Lấy tổng doanh thu
-            else:
-                doanh_thu = 0
-
-            # Trả về kết quả
-            return flask.jsonify({
-                "status": "success",
-                "Nam": nam,
-                "TongDoanhThu": doanh_thu
-            }), 200
-
+            sql = SQLGETALL_DONXULY_CT
+            cursor.execute(sql)
+            results = [] # kết quả
+            keys = []
+            for i in cursor.description: # lấy các key
+                keys.append(i[0])
+            for i in cursor.fetchall(): # lấy tất cả bản ghi
+                results.append(dict(zip(keys, i)))
+            resp = flask.jsonify(results)
+            resp.status_code = 200
+            return resp
         except Exception as e:
-            # Log lỗi chi tiết
-            return flask.jsonify({"status": "error", "message": f"Lỗi: {str(e)}"}), 500
-
-        finally:
-            # Đảm bảo đóng kết nối và cursor
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()
+            return flask.jsonify({"lỗi":e})
+    @app.route('/donhang/xuly', methods=['GET'])
+    def getDonXuLy():
+        try:
+            cursor = conn.cursor()
+            sql = SQLGETALL_DOXL
+            cursor.execute(sql)
+            results = [] # kết quả
+            keys = []
+            for i in cursor.description: # lấy các key
+                keys.append(i[0])
+            for i in cursor.fetchall(): # lấy tất cả bản ghi
+                results.append(dict(zip(keys, i)))
+            resp = flask.jsonify(results)
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi":e})
+    
+    #KET THU XU LY DAT HANG
 
     if __name__ == "__main__":
         app.run(debug=True, host='0.0.0.0', port=5000)
