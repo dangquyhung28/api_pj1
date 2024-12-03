@@ -705,6 +705,41 @@ try:
             return flask.jsonify({"lỗi": str(e)}), 500
         finally:
             cursor.close()
+    @app.route('/api/donhang/tongsodonhang', methods=['GET'])
+    def get_tong_so_don_hang():
+        try:
+            # Tạo cursor để thực hiện truy vấn
+            cursor = conn.cursor()
+
+            # Câu lệnh SQL để truy vấn từ view
+            sql = """
+            SELECT 
+                TongSoDonHangHomNay,
+                TongSoDonHangThangNay,
+                TongSoDonHangThangTruoc,
+                TongSoHoaDon
+            FROM 
+                vw_TongSoDonHang;
+            """
+            cursor.execute(sql)
+            result = cursor.fetchone()
+
+            # Trả về kết quả dưới dạng JSON
+            return flask.jsonify({
+                "TongSoDonHangHomNay": result[0],
+                "TongSoDonHangThangNay": result[1],
+                "TongSoDonHangThangTruoc": result[2],
+                "TongSoHoaDon": result[3]
+            })
+
+        except Exception as e:
+            # In ra lỗi chi tiết trong log Flask
+            print(f"Error: {str(e)}")
+            # Trả về lỗi 500
+            return flask.jsonify({"error": str(e)}), 500
+    
+
+
     @app.route('/api/get-don-hang/khachhang', methods=['GET'])
     def get_don_hang_kh():
         try:
@@ -1062,8 +1097,10 @@ try:
             for row in results:
                 data.append({
                     "TenSP": row.TenSP,
+                    "Ngay": row.Ngay,
                     "SoLuongBan": row.SoLuongBan,
-                    "DoanhThu": row.DoanhThuSanPham
+                    "DoanhThu": row.DoanhThuSanPham,
+                    "LoiNhuan": row.LoiNhuan
                 })
             
             resp = flask.jsonify(data)
@@ -1073,21 +1110,54 @@ try:
             return flask.jsonify({"lỗi": str(e)}), 500
 
         
-    @app.route('/api/doanhthu/thang', methods=['GET'])
+    @app.route('/api/doanhthu/sanpham/thangnay', methods=['GET'])
     def getDoanhThuThang():
         try:
             cursor = conn.cursor()
             
-            # Gọi stored procedure sp_DoanhThuThang
-            cursor.execute("EXEC sp_DoanhThuThang")
-            result = cursor.fetchone()
+            # Gọi stored procedure sp_TinhDoanhThuChiTietHomNay
+            cursor.execute("EXEC sp_TinhDoanhThuChiTietThang")
+            results = cursor.fetchall()
             
-            if result:
-                resp = flask.jsonify({"DoanhThuThang": result.DoanhThuThang})
-                resp.status_code = 200
-            else:
-                resp = flask.jsonify({"DoanhThuThang": 0})
-                resp.status_code = 200
+            # Chuẩn bị dữ liệu trả về
+            data = []
+            for row in results:
+                data.append({
+                    "TenSP": row.TenSP,
+                    "Ngay": row.Ngay,
+                    "SoLuongBan": row.SoLuongBan,
+                    "DoanhThu": row.DoanhThuSanPham,
+                    "LoiNhuan": row.LoiNhuan
+                })
+            
+            resp = flask.jsonify(data)
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return flask.jsonify({"lỗi": str(e)}), 500
+    
+    @app.route('/api/doanhthu/sanpham/thangtruoc', methods=['GET'])
+    def getDoanhThuThangTruoc():
+        try:
+            cursor = conn.cursor()
+            
+            # Gọi stored procedure sp_TinhDoanhThuChiTietHomNay
+            cursor.execute("EXEC sp_TinhDoanhThuChiTietThangTruoc")
+            results = cursor.fetchall()
+            
+            # Chuẩn bị dữ liệu trả về
+            data = []
+            for row in results:
+                data.append({
+                    "TenSP": row.TenSP,
+                    "Ngay": row.Ngay,
+                    "SoLuongBan": row.SoLuongBan,
+                    "DoanhThu": row.DoanhThuSanPham,
+                    "LoiNhuan": row.LoiNhuan
+                })
+            
+            resp = flask.jsonify(data)
+            resp.status_code = 200
             return resp
         except Exception as e:
             return flask.jsonify({"lỗi": str(e)}), 500
